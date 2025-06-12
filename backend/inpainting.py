@@ -1,7 +1,7 @@
 from PIL import Image
 import numpy as np
 import torch
-from simple_lama_inpainting import SimpleLama
+from lama import SimpleLama
 import os
 
 class Inpainter:
