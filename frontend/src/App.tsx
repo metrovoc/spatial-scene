@@ -1,11 +1,30 @@
 import { Canvas, useThree, useFrame } from "@react-three/fiber";
 import { OrbitControls, Plane, Text } from "@react-three/drei";
-import { useState, useRef, useMemo, Suspense } from "react";
+import { useState, useRef, useMemo, Suspense, useEffect } from "react";
 import * as THREE from "three";
 import screenfull from "screenfull";
-import { FullscreenIcon } from "./FullscreenIcon";
 
-function LdiScene({
+// Inlining the icon component to avoid module resolution issues.
+const FullscreenIcon = () => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="20"
+    height="20"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className="text-white"
+  >
+    <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+  </svg>
+);
+
+const LDI_PLANE_WIDTH = 5; // Base width for our 3D plane in world units
+
+function DynamicScene({
   originalImage,
   depthMap,
   imageSize,
@@ -14,14 +33,12 @@ function LdiScene({
   depthMap: string;
   imageSize: { width: number; height: number };
 }) {
+  const { camera, size: canvasSize } = useThree();
   const layers = 10;
   const depth = 0.5;
 
-  const { width, height } = imageSize;
-  const aspect = width / height;
-
-  const planeWidth = 5;
-  const planeHeight = 5 / aspect;
+  const imageAspect = imageSize.width / imageSize.height;
+  const planeHeight = LDI_PLANE_WIDTH / imageAspect;
 
   const originalTexture = useMemo(
     () => new THREE.TextureLoader().load(originalImage),
@@ -32,10 +49,34 @@ function LdiScene({
     [depthMap]
   );
 
+  useEffect(() => {
+    if (!(camera instanceof THREE.PerspectiveCamera)) return;
+
+    const verticalFov = camera.fov * (Math.PI / 180);
+    const horizontalFov =
+      2 *
+      Math.atan(
+        (Math.tan(verticalFov / 2) * canvasSize.width) / canvasSize.height
+      );
+
+    const distanceForHeight = planeHeight / 2 / Math.tan(verticalFov / 2);
+    const distanceForWidth = LDI_PLANE_WIDTH / 2 / Math.tan(horizontalFov / 2);
+
+    const newZ = Math.max(distanceForHeight, distanceForWidth) * 1.1;
+
+    camera.position.z = newZ;
+    camera.updateProjectionMatrix();
+  }, [camera, canvasSize, planeHeight, imageAspect]);
+
+  useFrame(({ mouse }) => {
+    const x = mouse.x * 0.1;
+    const y = mouse.y * 0.1;
+    camera.position.lerp(new THREE.Vector3(x, y, camera.position.z), 0.05);
+    camera.lookAt(0, 0, 0);
+  });
+
   const onBeforeCompile = (shader: any) => {
     shader.uniforms.depthMap = { value: depthTexture };
-    shader.uniforms.z_offset = { value: 0 };
-
     shader.vertexShader = `
       uniform sampler2D depthMap;
       varying float v_depth;
@@ -67,7 +108,7 @@ function LdiScene({
 
         return (
           <Plane
-            args={[planeWidth, planeHeight]}
+            args={[LDI_PLANE_WIDTH, planeHeight]}
             position={[0, 0, layerDepth]}
             key={i}
           >
@@ -81,17 +122,6 @@ function LdiScene({
       })}
     </>
   );
-}
-
-function SceneController() {
-  const { camera } = useThree();
-  useFrame(({ mouse }) => {
-    const x = mouse.x * 0.1;
-    const y = mouse.y * 0.1;
-    camera.position.lerp(new THREE.Vector3(x, y, 5), 0.05);
-    camera.lookAt(0, 0, 0);
-  });
-  return null;
 }
 
 function App() {
@@ -116,6 +146,7 @@ function App() {
     const img = new Image();
     img.onload = () => {
       setImageSize({ width: img.naturalWidth, height: img.naturalHeight });
+      URL.revokeObjectURL(imageUrl);
     };
     img.src = imageUrl;
 
@@ -166,11 +197,11 @@ function App() {
         >
           <FullscreenIcon />
         </button>
-        <Canvas camera={{ position: [0, 0, 5], fov: 30 }}>
+        <Canvas camera={{ fov: 45 }}>
           <ambientLight intensity={1.5} />
           <Suspense fallback={null}>
             {originalImage && depthMap ? (
-              <LdiScene
+              <DynamicScene
                 originalImage={originalImage}
                 depthMap={depthMap}
                 imageSize={imageSize}
@@ -181,7 +212,6 @@ function App() {
               </Text>
             )}
           </Suspense>
-          <SceneController />
         </Canvas>
         {isLoading && (
           <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center">
