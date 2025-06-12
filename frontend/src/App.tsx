@@ -24,22 +24,21 @@ const FullscreenIcon = () => (
 
 const LDI_PLANE_WIDTH = 5; // Base width for our 3D plane in world units
 
-function DynamicScene({
+function LdiLayers({
+  layers,
+  depth,
   originalImage,
   depthMap,
-  imageSize,
+  planeWidth,
+  planeHeight,
 }: {
+  layers: number;
+  depth: number;
   originalImage: string;
   depthMap: string;
-  imageSize: { width: number; height: number };
+  planeWidth: number;
+  planeHeight: number;
 }) {
-  const { camera, size: canvasSize } = useThree();
-  const layers = 10;
-  const depth = 0.5;
-
-  const imageAspect = imageSize.width / imageSize.height;
-  const planeHeight = LDI_PLANE_WIDTH / imageAspect;
-
   const originalTexture = useMemo(
     () => new THREE.TextureLoader().load(originalImage),
     [originalImage]
@@ -49,78 +48,132 @@ function DynamicScene({
     [depthMap]
   );
 
-  useEffect(() => {
-    if (!(camera instanceof THREE.PerspectiveCamera)) return;
-
-    const verticalFov = camera.fov * (Math.PI / 180);
-    const horizontalFov =
-      2 *
-      Math.atan(
-        (Math.tan(verticalFov / 2) * canvasSize.width) / canvasSize.height
-      );
-
-    const distanceForHeight = planeHeight / 2 / Math.tan(verticalFov / 2);
-    const distanceForWidth = LDI_PLANE_WIDTH / 2 / Math.tan(horizontalFov / 2);
-
-    const newZ = Math.max(distanceForHeight, distanceForWidth) * 1.1;
-
-    camera.position.z = newZ;
-    camera.updateProjectionMatrix();
-  }, [camera, canvasSize, planeHeight, imageAspect]);
-
-  useFrame(({ mouse }) => {
-    const x = mouse.x * 0.1;
-    const y = mouse.y * 0.1;
-    camera.position.lerp(new THREE.Vector3(x, y, camera.position.z), 0.05);
-    camera.lookAt(0, 0, 0);
-  });
-
-  const onBeforeCompile = (shader: any) => {
-    shader.uniforms.depthMap = { value: depthTexture };
-    shader.vertexShader = `
-      uniform sampler2D depthMap;
-      varying float v_depth;
-      ${shader.vertexShader}
-    `.replace(
-      `#include <begin_vertex>`,
-      `#include <begin_vertex>
-      vec4 depth_color = texture2D(depthMap, uv);
-      float depth_value = depth_color.r;
-      v_depth = depth_value;
-      transformed.z += depth_value * 0.1;`
-    );
-
-    shader.fragmentShader = `
-        varying float v_depth;
-        ${shader.fragmentShader}
-    `.replace(
-      `vec4 diffuseColor = vec4( diffuse, opacity );`,
-      `vec4 diffuseColor = vec4( diffuse, opacity );
-         if (v_depth < 0.1) discard;`
-    );
-  };
+  originalTexture.wrapS = originalTexture.wrapT = THREE.RepeatWrapping;
+  depthTexture.wrapS = depthTexture.wrapT = THREE.RepeatWrapping;
 
   return (
     <>
       {Array.from({ length: layers }).map((_, i) => {
-        const layerDepth = (i / (layers - 1)) * depth - depth / 2;
-        const planeOpacity = i === 0 ? 1 : 1.0 / layers;
+        const layerZ = (i / (layers - 1)) * depth - depth / 2;
+        const depthSlice = i / (layers - 1);
 
         return (
           <Plane
-            args={[LDI_PLANE_WIDTH, planeHeight]}
-            position={[0, 0, layerDepth]}
+            args={[planeWidth, planeHeight]}
+            position={[0, 0, layerZ]}
             key={i}
           >
             <meshStandardMaterial
               map={originalTexture}
+              depthTest={false}
               transparent={true}
-              onBeforeCompile={onBeforeCompile}
+              onBeforeCompile={(shader) => {
+                shader.uniforms.depthMap = { value: depthTexture };
+                shader.uniforms.u_depth_slice = { value: depthSlice };
+                shader.uniforms.u_layers_count = { value: layers };
+                shader.uniforms.u_scene_depth = { value: depth };
+
+                shader.vertexShader = `
+                uniform sampler2D depthMap;
+                varying float v_depth;
+                ${shader.vertexShader}
+              `.replace(
+                  `#include <begin_vertex>`,
+                  `#include <begin_vertex>
+                vec4 depth_color = texture2D(depthMap, uv);
+                v_depth = depth_color.r;
+                `
+                );
+
+                shader.fragmentShader = `
+                uniform float u_depth_slice;
+                uniform float u_layers_count;
+                varying float v_depth;
+                ${shader.fragmentShader}
+              `.replace(
+                  `vec4 diffuseColor = vec4( diffuse, opacity );`,
+                  `
+                float depth_threshold = (1.0 / u_layers_count) * 0.5;
+                float alpha = smoothstep(u_depth_slice - depth_threshold, u_depth_slice, v_depth) - smoothstep(u_depth_slice, u_depth_slice + depth_threshold, v_depth);
+                vec4 diffuseColor = vec4(diffuse, alpha * opacity);
+                `
+                );
+              }}
             />
           </Plane>
         );
       })}
     </>
+  );
+}
+
+function SpatialScene({
+  originalImage,
+  depthMap,
+  imageSize,
+}: {
+  originalImage: string;
+  depthMap: string;
+  imageSize: { width: number; height: number };
+}) {
+  const groupRef = useRef<THREE.Group>(null!);
+  const { camera, size: canvasSize } = useThree();
+
+  const layers = 16;
+  const sceneDepth = 0.5;
+  const basePlaneWidth = 5;
+
+  const imageAspect = imageSize.width / imageSize.height;
+  const planeHeight = basePlaneWidth / imageAspect;
+
+  useEffect(() => {
+    if (!(camera instanceof THREE.PerspectiveCamera)) return;
+
+    const verticalFov = camera.fov * (Math.PI / 180);
+    const canvasAspect = canvasSize.width / canvasSize.height;
+
+    let distance;
+    if (imageAspect > canvasAspect) {
+      const horizontalFov =
+        2 * Math.atan(Math.tan(verticalFov / 2) * canvasAspect);
+      distance = basePlaneWidth / 2 / Math.tan(horizontalFov / 2);
+    } else {
+      distance = planeHeight / 2 / Math.tan(verticalFov / 2);
+    }
+
+    camera.position.z = distance * 1.2;
+    camera.lookAt(0, 0, 0);
+    camera.updateProjectionMatrix();
+  }, [camera, canvasSize, imageSize, planeHeight, imageAspect]);
+
+  useFrame(({ mouse }) => {
+    if (groupRef.current) {
+      const x = (mouse.x * Math.PI) / 12;
+      const y = (mouse.y * Math.PI) / 12;
+      groupRef.current.rotation.x = THREE.MathUtils.lerp(
+        groupRef.current.rotation.x,
+        -y,
+        0.05
+      );
+      groupRef.current.rotation.y = THREE.MathUtils.lerp(
+        groupRef.current.rotation.y,
+        x,
+        0.05
+      );
+    }
+  });
+
+  return (
+    <group ref={groupRef}>
+      <LdiLayers
+        layers={layers}
+        depth={sceneDepth}
+        originalImage={originalImage}
+        depthMap={depthMap}
+        planeWidth={basePlaneWidth}
+        planeHeight={planeHeight}
+      />
+    </group>
   );
 }
 
@@ -209,7 +262,7 @@ function App() {
           <ambientLight intensity={1.5} />
           <Suspense fallback={null}>
             {originalImage && depthMap ? (
-              <DynamicScene
+              <SpatialScene
                 originalImage={originalImage}
                 depthMap={depthMap}
                 imageSize={imageSize}
