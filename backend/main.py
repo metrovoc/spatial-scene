@@ -4,6 +4,7 @@ from PIL import Image
 import io
 import base64
 from depth_estimation import depth_estimator
+from inpainting import inpainter
 
 app = FastAPI()
 
@@ -29,12 +30,25 @@ async def process_image(file: UploadFile = File(...)):
     contents = await file.read()
     image = Image.open(io.BytesIO(contents))
     
+    # 1. Estimate Depth
     depth_map_image = depth_estimator.estimate_depth(image)
     
-    buffered = io.BytesIO()
-    depth_map_image.save(buffered, format="PNG")
-    depth_map_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
-    
+    # 2. Inpaint Image
+    inpainted_image = inpainter.inpaint_image(image)
+
+    # 3. Encode all images to Base64
+    def image_to_base64(img: Image.Image) -> str:
+        buffered = io.BytesIO()
+        img.save(buffered, format="PNG")
+        encoded = base64.b64encode(buffered.getvalue()).decode("utf-8")
+        return f"data:image/png;base64,{encoded}"
+
+    original_base64 = image_to_base64(image.convert("RGB"))
+    depth_map_base64 = image_to_base64(depth_map_image)
+    inpainted_base64 = image_to_base64(inpainted_image)
+
     return {
-        "depth_map": f"data:image/png;base64,{depth_map_base64}"
+        "original_image": original_base64,
+        "depth_map": depth_map_base64,
+        "inpainted_image": inpainted_base64
     } 

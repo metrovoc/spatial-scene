@@ -16,3 +16,5 @@ frontend/src/components/
 frontend/src/pages/
 frontend/src/styles/
 frontend/src/utils/
+backend/models/big-lama/models/best.ckpt
+backend/models/big-lama.zip

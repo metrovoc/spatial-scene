@@ -1,5 +1,5 @@
 import { Canvas, useThree, useFrame } from "@react-three/fiber";
-import { OrbitControls, Plane, Text } from "@react-three/drei";
+import { Plane, Text } from "@react-three/drei";
 import { useState, useRef, useMemo, Suspense, useEffect } from "react";
 import * as THREE from "three";
 import screenfull from "screenfull";
@@ -24,38 +24,97 @@ const FullscreenIcon = () => (
 
 const LDI_PLANE_WIDTH = 5; // Base width for our 3D plane in world units
 
+// This is the new, advanced LDI renderer with true parallax.
 function LdiLayers({
-  layers,
-  depth,
-  originalImage,
+  inpaintedImage,
   depthMap,
   planeWidth,
   planeHeight,
 }: {
-  layers: number;
-  depth: number;
-  originalImage: string;
+  inpaintedImage: string;
   depthMap: string;
   planeWidth: number;
   planeHeight: number;
 }) {
-  const originalTexture = useMemo(
-    () => new THREE.TextureLoader().load(originalImage),
-    [originalImage]
+  const layers = 32; // More layers for a smoother effect
+  const parallaxFactor = 0.2; // How much the layers shift
+
+  const texture = useMemo(
+    () => new THREE.TextureLoader().load(inpaintedImage),
+    [inpaintedImage]
   );
   const depthTexture = useMemo(
     () => new THREE.TextureLoader().load(depthMap),
     [depthMap]
   );
 
-  originalTexture.wrapS = originalTexture.wrapT = THREE.RepeatWrapping;
-  depthTexture.wrapS = depthTexture.wrapT = THREE.RepeatWrapping;
+  const mouse = useRef(new THREE.Vector2(0, 0));
+
+  useFrame(({ mouse: { x, y } }) => {
+    // Lerp the mouse position for smooth movement
+    mouse.current.lerp(new THREE.Vector2(x, y), 0.05);
+  });
+
+  const vertexShader = `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `;
+
+  const fragmentShader = `
+    uniform sampler2D uTexture;
+    uniform sampler2D uDepthMap;
+    uniform int uLayer;
+    uniform int uLayers;
+    uniform vec2 uMouse;
+    uniform float uParallax;
+    varying vec2 vUv;
+
+    void main() {
+      float layer_depth = float(uLayer) / float(uLayers);
+      
+      // Calculate parallax offset
+      vec2 parallaxOffset = uMouse * uParallax * layer_depth;
+      vec2 parallaxUv = vUv - parallaxOffset;
+
+      if (parallaxUv.x < 0.0 || parallaxUv.x > 1.0 || parallaxUv.y < 0.0 || parallaxUv.y > 1.0) {
+        discard;
+      }
+      
+      float scene_depth = texture2D(uDepthMap, parallaxUv).r;
+
+      float slice_width = 1.0 / float(uLayers);
+      float slice_floor = layer_depth;
+      float slice_ceil = slice_floor + slice_width;
+
+      // Use smoothstep for soft layer blending
+      float fuzz = slice_width * 0.4;
+      float alpha = smoothstep(slice_floor - fuzz, slice_floor, scene_depth) - smoothstep(slice_ceil, slice_ceil + fuzz, scene_depth);
+
+      if (alpha < 0.01) {
+        discard;
+      }
+
+      vec4 color = texture2D(uTexture, parallaxUv);
+      gl_FragColor = vec4(color.rgb, color.a * alpha);
+    }
+  `;
 
   return (
     <>
       {Array.from({ length: layers }).map((_, i) => {
-        const layerZ = (i / (layers - 1)) * depth - depth / 2;
-        const depthSlice = i / (layers - 1);
+        const layerZ = i * 0.001; // Stagger layers slightly to handle transparency correctly
+
+        const uniforms = {
+          uTexture: { value: texture },
+          uDepthMap: { value: depthTexture },
+          uLayer: { value: i },
+          uLayers: { value: layers },
+          uMouse: { value: mouse.current },
+          uParallax: { value: parallaxFactor },
+        };
 
         return (
           <Plane
@@ -63,42 +122,12 @@ function LdiLayers({
             position={[0, 0, layerZ]}
             key={i}
           >
-            <meshStandardMaterial
-              map={originalTexture}
-              depthTest={false}
+            <shaderMaterial
+              vertexShader={vertexShader}
+              fragmentShader={fragmentShader}
+              uniforms={uniforms}
               transparent={true}
-              onBeforeCompile={(shader) => {
-                shader.uniforms.depthMap = { value: depthTexture };
-                shader.uniforms.u_depth_slice = { value: depthSlice };
-                shader.uniforms.u_layers_count = { value: layers };
-                shader.uniforms.u_scene_depth = { value: depth };
-
-                shader.vertexShader = `
-                uniform sampler2D depthMap;
-                varying float v_depth;
-                ${shader.vertexShader}
-              `.replace(
-                  `#include <begin_vertex>`,
-                  `#include <begin_vertex>
-                vec4 depth_color = texture2D(depthMap, uv);
-                v_depth = depth_color.r;
-                `
-                );
-
-                shader.fragmentShader = `
-                uniform float u_depth_slice;
-                uniform float u_layers_count;
-                varying float v_depth;
-                ${shader.fragmentShader}
-              `.replace(
-                  `vec4 diffuseColor = vec4( diffuse, opacity );`,
-                  `
-                float depth_threshold = (1.0 / u_layers_count) * 0.5;
-                float alpha = smoothstep(u_depth_slice - depth_threshold, u_depth_slice, v_depth) - smoothstep(u_depth_slice, u_depth_slice + depth_threshold, v_depth);
-                vec4 diffuseColor = vec4(diffuse, alpha * opacity);
-                `
-                );
-              }}
+              depthWrite={false}
             />
           </Plane>
         );
@@ -108,21 +137,17 @@ function LdiLayers({
 }
 
 function SpatialScene({
-  originalImage,
+  inpaintedImage,
   depthMap,
   imageSize,
 }: {
-  originalImage: string;
+  inpaintedImage: string;
   depthMap: string;
   imageSize: { width: number; height: number };
 }) {
-  const groupRef = useRef<THREE.Group>(null!);
   const { camera, size: canvasSize } = useThree();
 
-  const layers = 16;
-  const sceneDepth = 0.5;
   const basePlaneWidth = 5;
-
   const imageAspect = imageSize.width / imageSize.height;
   const planeHeight = basePlaneWidth / imageAspect;
 
@@ -146,29 +171,10 @@ function SpatialScene({
     camera.updateProjectionMatrix();
   }, [camera, canvasSize, imageSize, planeHeight, imageAspect]);
 
-  useFrame(({ mouse }) => {
-    if (groupRef.current) {
-      const x = (mouse.x * Math.PI) / 12;
-      const y = (mouse.y * Math.PI) / 12;
-      groupRef.current.rotation.x = THREE.MathUtils.lerp(
-        groupRef.current.rotation.x,
-        -y,
-        0.05
-      );
-      groupRef.current.rotation.y = THREE.MathUtils.lerp(
-        groupRef.current.rotation.y,
-        x,
-        0.05
-      );
-    }
-  });
-
   return (
-    <group ref={groupRef}>
+    <group>
       <LdiLayers
-        layers={layers}
-        depth={sceneDepth}
-        originalImage={originalImage}
+        inpaintedImage={inpaintedImage}
         depthMap={depthMap}
         planeWidth={basePlaneWidth}
         planeHeight={planeHeight}
@@ -179,17 +185,23 @@ function SpatialScene({
 
 function App() {
   const [originalImage, setOriginalImage] = useState<string | null>(null);
+  const [inpaintedImage, setInpaintedImage] = useState<string | null>(null);
   const [depthMap, setDepthMap] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [imageSize, setImageSize] = useState({ width: 1, height: 1 });
   const fileInputRef = useRef<HTMLInputElement>(null);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
 
-  // Effect to handle cleanup of blob URLs
+  // Effect to handle cleanup of blob URL for the initial upload
   useEffect(() => {
+    let blobUrl: string | null = null;
+    if (originalImage && originalImage.startsWith("blob:")) {
+      blobUrl = originalImage;
+    }
+
     return () => {
-      if (originalImage) {
-        URL.revokeObjectURL(originalImage);
+      if (blobUrl) {
+        URL.revokeObjectURL(blobUrl);
       }
     };
   }, [originalImage]);
@@ -201,15 +213,17 @@ function App() {
     if (!file) return;
 
     setIsLoading(true);
-    const imageUrl = URL.createObjectURL(file);
-    setOriginalImage(imageUrl);
+    // Use a blob URL only for the initial preview
+    const previewUrl = URL.createObjectURL(file);
+    setOriginalImage(previewUrl);
     setDepthMap(null);
+    setInpaintedImage(null);
 
     const img = new Image();
     img.onload = () => {
       setImageSize({ width: img.naturalWidth, height: img.naturalHeight });
     };
-    img.src = imageUrl;
+    img.src = previewUrl;
 
     const formData = new FormData();
     formData.append("file", file);
@@ -220,9 +234,14 @@ function App() {
         body: formData,
       });
       const data = await response.json();
+      // Now use the persistent base64 URLs from the server
+      setOriginalImage(data.original_image);
       setDepthMap(data.depth_map);
+      setInpaintedImage(data.inpainted_image);
     } catch (error) {
       console.error("Error processing image:", error);
+      // Reset on error
+      setOriginalImage(null);
     } finally {
       setIsLoading(false);
     }
@@ -243,7 +262,7 @@ function App() {
       <header className="p-4 text-center">
         <h1 className="text-4xl font-bold">Spatial Scene</h1>
         <p className="text-slate-400">
-          Upload an image to convert it into a 3D scene.
+          Upload an image to convert it into a 3D scene with real parallax.
         </p>
       </header>
 
@@ -261,9 +280,9 @@ function App() {
         <Canvas camera={{ fov: 45 }}>
           <ambientLight intensity={1.5} />
           <Suspense fallback={null}>
-            {originalImage && depthMap ? (
+            {inpaintedImage && depthMap ? (
               <SpatialScene
-                originalImage={originalImage}
+                inpaintedImage={inpaintedImage}
                 depthMap={depthMap}
                 imageSize={imageSize}
               />
@@ -287,7 +306,7 @@ function App() {
         <div className="inline-block bg-slate-800 rounded-lg p-6 border border-slate-700">
           <p className="mb-4">
             {originalImage
-              ? "Move your mouse to explore the scene"
+              ? "Move your mouse to experience the parallax effect"
               : "Select an image to begin"}
           </p>
           <input
