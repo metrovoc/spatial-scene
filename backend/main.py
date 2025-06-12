@@ -33,9 +33,8 @@ async def process_image(file: UploadFile = File(...)):
     # 1. Estimate Depth
     depth_map_image = depth_estimator.estimate_depth(image)
     
-    # 2. Inpaint Image
-    # inpainted_image = inpainter.inpaint_image(image)
-    inpainted_image = image # Use original image for now
+    # 2. Inpaint Image (and depth map)
+    inpainted_image, inpainted_depth_map = inpainter.inpaint_image(image, depth_map_image)
 
     # 3. Encode all images to Base64
     def image_to_base64(img: Image.Image) -> str:
@@ -45,12 +44,11 @@ async def process_image(file: UploadFile = File(...)):
         return f"data:image/png;base64,{encoded}"
 
     original_base64 = image_to_base64(image.convert("RGB"))
-    depth_map_base64 = image_to_base64(depth_map_image)
+    depth_map_base64 = image_to_base64(inpainted_depth_map)
     inpainted_base64 = image_to_base64(inpainted_image)
 
     return {
         "original_image": original_base64,
         "depth_map": depth_map_base64,
-        # "inpainted_image": inpainted_base64
-        "inpainted_image": original_base64 # Use original image for now
+        "inpainted_image": inpainted_base64
     } 

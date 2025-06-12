@@ -3,6 +3,7 @@ import numpy as np
 import torch
 from lama import SimpleLama
 import os
+import cv2
 
 class Inpainter:
     _instance = None
@@ -26,22 +27,45 @@ class Inpainter:
             self.initialized = True
             print("Inpainter initialized.")
 
-    def inpaint_image(self, image: Image.Image) -> Image.Image:
+    def inpaint_image(self, image: Image.Image, depth_map: Image.Image) -> tuple[Image.Image, Image.Image]:
         """
-        Performs inpainting on the entire image to fill potential missing areas.
+        Performs context-aware inpainting on an image based on a depth map.
+        It identifies disocclusion areas from the depth map, inpaints both the
+        color image and the depth map, and returns the results.
         """
-        print("Starting image inpainting...")
-        
-        # Create a mask that covers the entire image
-        mask = Image.fromarray(np.ones((image.height, image.width), dtype=np.uint8) * 255)
+        print("Starting context-aware inpainting...")
 
-        # The library expects the image in RGB format
+        # Convert PIL Images to numpy arrays for processing
         image_rgb = image.convert("RGB")
+        image_np = np.array(image_rgb)
+        depth_map_np = np.array(depth_map.convert("L"))
+
+        # 1. Create a mask from depth discontinuities
+        # Use Canny edge detector on the depth map to find sharp changes
+        edges = cv2.Canny(depth_map_np, threshold1=50, threshold2=150)
+
+        # Dilate the edges to create a wider mask for inpainting
+        # This covers the area "behind" the edges that needs to be filled
+        kernel = np.ones((15, 15), np.uint8)
+        mask_dilated = cv2.dilate(edges, kernel, iterations=1)
         
+        # Convert dilated mask to a PIL Image
+        mask = Image.fromarray(mask_dilated)
+
+        # 2. Inpaint the color image
+        print("Inpainting color image...")
         inpainted_image = self.lama(image_rgb, mask)
         
-        print("Image inpainting finished.")
-        return inpainted_image
+        # 3. Inpaint the depth map
+        print("Inpainting depth map...")
+        # Use Navier-Stokes based inpainting from OpenCV
+        inpainted_depth_np = cv2.inpaint(depth_map_np, mask_dilated, 10, cv2.INPAINT_NS)
+
+        # Convert the results back to PIL Images
+        inpainted_depth_map = Image.fromarray(inpainted_depth_np)
+
+        print("Context-aware inpainting finished.")
+        return inpainted_image, inpainted_depth_map
 
 # Singleton instance
 inpainter = Inpainter() 
