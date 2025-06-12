@@ -132,6 +132,15 @@ function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
 
+  // Effect to handle cleanup of blob URLs
+  useEffect(() => {
+    return () => {
+      if (originalImage) {
+        URL.revokeObjectURL(originalImage);
+      }
+    };
+  }, [originalImage]);
+
   const handleImageUpload = async (
     event: React.ChangeEvent<HTMLInputElement>
   ) => {
@@ -146,7 +155,6 @@ function App() {
     const img = new Image();
     img.onload = () => {
       setImageSize({ width: img.naturalWidth, height: img.naturalHeight });
-      URL.revokeObjectURL(imageUrl);
     };
     img.src = imageUrl;
 
