@@ -2,16 +2,26 @@ import { Canvas, useThree, useFrame } from "@react-three/fiber";
 import { OrbitControls, Plane, Text } from "@react-three/drei";
 import { useState, useRef, useMemo, Suspense } from "react";
 import * as THREE from "three";
+import screenfull from "screenfull";
+import { FullscreenIcon } from "./FullscreenIcon";
 
 function LdiScene({
   originalImage,
   depthMap,
+  imageSize,
 }: {
   originalImage: string;
   depthMap: string;
+  imageSize: { width: number; height: number };
 }) {
   const layers = 10;
   const depth = 0.5;
+
+  const { width, height } = imageSize;
+  const aspect = width / height;
+
+  const planeWidth = 5;
+  const planeHeight = 5 / aspect;
 
   const originalTexture = useMemo(
     () => new THREE.TextureLoader().load(originalImage),
@@ -56,7 +66,11 @@ function LdiScene({
         const planeOpacity = i === 0 ? 1 : 1.0 / layers;
 
         return (
-          <Plane args={[5, 5]} position={[0, 0, layerDepth]} key={i}>
+          <Plane
+            args={[planeWidth, planeHeight]}
+            position={[0, 0, layerDepth]}
+            key={i}
+          >
             <meshStandardMaterial
               map={originalTexture}
               transparent={true}
@@ -84,7 +98,9 @@ function App() {
   const [originalImage, setOriginalImage] = useState<string | null>(null);
   const [depthMap, setDepthMap] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [imageSize, setImageSize] = useState({ width: 1, height: 1 });
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const canvasContainerRef = useRef<HTMLDivElement>(null);
 
   const handleImageUpload = async (
     event: React.ChangeEvent<HTMLInputElement>
@@ -93,8 +109,15 @@ function App() {
     if (!file) return;
 
     setIsLoading(true);
-    setOriginalImage(URL.createObjectURL(file));
+    const imageUrl = URL.createObjectURL(file);
+    setOriginalImage(imageUrl);
     setDepthMap(null);
+
+    const img = new Image();
+    img.onload = () => {
+      setImageSize({ width: img.naturalWidth, height: img.naturalHeight });
+    };
+    img.src = imageUrl;
 
     const formData = new FormData();
     formData.append("file", file);
@@ -117,6 +140,12 @@ function App() {
     fileInputRef.current?.click();
   };
 
+  const handleFullscreen = () => {
+    if (screenfull.isEnabled && canvasContainerRef.current) {
+      screenfull.toggle(canvasContainerRef.current);
+    }
+  };
+
   return (
     <main className="bg-slate-900 text-white min-h-screen">
       <header className="p-4 text-center">
@@ -126,12 +155,26 @@ function App() {
         </p>
       </header>
 
-      <div className="w-full h-[60vh] border-y border-slate-700 relative">
+      <div
+        ref={canvasContainerRef}
+        className="w-full h-[60vh] border-y border-slate-700 relative bg-black"
+      >
+        <button
+          onClick={handleFullscreen}
+          className="absolute top-2 right-2 z-10 p-2 bg-slate-700 bg-opacity-50 rounded-md hover:bg-opacity-75 transition-colors"
+          title="Toggle Fullscreen"
+        >
+          <FullscreenIcon />
+        </button>
         <Canvas camera={{ position: [0, 0, 5], fov: 30 }}>
           <ambientLight intensity={1.5} />
           <Suspense fallback={null}>
             {originalImage && depthMap ? (
-              <LdiScene originalImage={originalImage} depthMap={depthMap} />
+              <LdiScene
+                originalImage={originalImage}
+                depthMap={depthMap}
+                imageSize={imageSize}
+              />
             ) : (
               <Text color="white" anchorX="center" anchorY="middle">
                 {isLoading ? "Processing..." : "Upload an image"}
@@ -142,7 +185,9 @@ function App() {
         </Canvas>
         {isLoading && (
           <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center">
-            <div className="text-white text-2xl">Processing...</div>
+            <div className="animate-pulse text-white text-2xl">
+              Processing...
+            </div>
           </div>
         )}
       </div>
@@ -151,7 +196,7 @@ function App() {
         <div className="inline-block bg-slate-800 rounded-lg p-6 border border-slate-700">
           <p className="mb-4">
             {originalImage
-              ? "Drag to explore the scene"
+              ? "Move your mouse to explore the scene"
               : "Select an image to begin"}
           </p>
           <input
