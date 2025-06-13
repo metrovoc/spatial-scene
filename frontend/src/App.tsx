@@ -30,11 +30,13 @@ function LdiLayers({
   depthMap,
   planeWidth,
   planeHeight,
+  isGyroEnabled,
 }: {
   inpaintedImage: string;
   depthMap: string;
   planeWidth: number;
   planeHeight: number;
+  isGyroEnabled: boolean;
 }) {
   const layers = 32; // More layers for a smoother effect
   const parallaxFactor = 0.05; // How much the layers shift
@@ -60,7 +62,7 @@ function LdiLayers({
   const targetParallax = useRef(new THREE.Vector2(0, 0));
 
   useEffect(() => {
-    if (!isMobile) return;
+    if (!isMobile || !isGyroEnabled) return;
 
     const handleDeviceOrientation = (event: DeviceOrientationEvent) => {
       if (event.gamma === null || event.beta === null) return;
@@ -82,7 +84,7 @@ function LdiLayers({
     return () => {
       window.removeEventListener("deviceorientation", handleDeviceOrientation);
     };
-  }, [isMobile]);
+  }, [isMobile, isGyroEnabled]);
 
   useFrame(({ mouse }) => {
     if (!isMobile) {
@@ -176,10 +178,12 @@ function SpatialScene({
   inpaintedImage,
   depthMap,
   imageSize,
+  isGyroEnabled,
 }: {
   inpaintedImage: string;
   depthMap: string;
   imageSize: { width: number; height: number };
+  isGyroEnabled: boolean;
 }) {
   const { camera, size: canvasSize } = useThree();
 
@@ -214,6 +218,7 @@ function SpatialScene({
         depthMap={depthMap}
         planeWidth={basePlaneWidth}
         planeHeight={planeHeight}
+        isGyroEnabled={isGyroEnabled}
       />
     </group>
   );
@@ -225,20 +230,29 @@ function App() {
   const [depthMap, setDepthMap] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [imageSize, setImageSize] = useState({ width: 1, height: 1 });
-  const [showGyroButton, setShowGyroButton] = useState(false);
+  const [gyroPermissionState, setGyroPermissionState] = useState<
+    "prompt" | "granted" | "denied"
+  >("prompt");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
 
+  const isMobile = useMemo(
+    () =>
+      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+        navigator.userAgent
+      ),
+    []
+  );
+
   useEffect(() => {
-    const isIOS =
-      /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
+    // For non-iOS devices that support DeviceOrientation out of the box (e.g., Android in secure contexts)
     if (
-      isIOS &&
-      typeof (DeviceOrientationEvent as any).requestPermission === "function"
+      isMobile &&
+      typeof (DeviceOrientationEvent as any).requestPermission !== "function"
     ) {
-      setShowGyroButton(true);
+      setGyroPermissionState("granted");
     }
-  }, []);
+  }, [isMobile]);
 
   // Effect to handle cleanup of blob URL for the initial upload
   useEffect(() => {
@@ -259,12 +273,17 @@ function App() {
       .requestPermission()
       .then((permissionState: string) => {
         if (permissionState === "granted") {
-          setShowGyroButton(false);
+          setGyroPermissionState("granted");
         } else {
+          setGyroPermissionState("denied");
           alert("Gyroscope permission not granted.");
         }
       })
-      .catch(console.error);
+      .catch((error: any) => {
+        console.error(error);
+        setGyroPermissionState("denied");
+        alert("Error requesting gyroscope permission.");
+      });
   };
 
   const handleImageUpload = async (
@@ -332,7 +351,7 @@ function App() {
           Upload an image to convert it into a 3D scene with real parallax.
         </p>
       </header>
-      {showGyroButton && (
+      {isMobile && gyroPermissionState === "prompt" && (
         <div className="flex justify-center mb-4">
           <button
             onClick={handleRequestGyroPermission}
@@ -361,6 +380,7 @@ function App() {
                 inpaintedImage={inpaintedImage}
                 depthMap={depthMap}
                 imageSize={imageSize}
+                isGyroEnabled={gyroPermissionState === "granted"}
               />
             ) : (
               <Text color="white" anchorX="center" anchorY="middle">
