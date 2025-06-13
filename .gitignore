@@ -18,6 +18,7 @@ frontend/src/styles/
 frontend/src/utils/
 backend/models/big-lama/models/best.ckpt
 backend/models/big-lama.zip
+backend/gallery/
 backend/lama/utils/__pycache__/
 backend/lama/__pycache__/
 **/__pycache__/

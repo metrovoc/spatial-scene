@@ -3,8 +3,9 @@ import { Plane, Text } from "@react-three/drei";
 import { useState, useRef, useMemo, Suspense, useEffect } from "react";
 import * as THREE from "three";
 import screenfull from "screenfull";
+import Gallery from "./components/Gallery";
 
-// Inlining the icon component to avoid module resolution issues.
+// Inlining the icon components to avoid module resolution issues.
 const FullscreenIcon = () => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
@@ -19,6 +20,43 @@ const FullscreenIcon = () => (
     className="text-white"
   >
     <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+  </svg>
+);
+
+const GalleryIcon = () => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="20"
+    height="20"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className="text-white"
+  >
+    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+    <circle cx="8.5" cy="8.5" r="1.5" />
+    <polyline points="21,15 16,10 5,21" />
+  </svg>
+);
+
+const SaveIcon = () => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="16"
+    height="16"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+    <polyline points="17,21 17,13 7,13 7,21" />
+    <polyline points="7,3 7,8 15,8" />
   </svg>
 );
 
@@ -269,6 +307,8 @@ function App() {
   const [gyroPermissionState, setGyroPermissionState] = useState<
     "prompt" | "granted" | "denied"
   >("prompt");
+  const [showGallery, setShowGallery] = useState(false);
+  const [currentSceneTitle, setCurrentSceneTitle] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
 
@@ -378,15 +418,64 @@ function App() {
     fileInputRef.current?.click();
   };
 
+  const saveToGallery = async () => {
+    if (!inpaintedImage || !depthMap || !originalImage) return;
+
+    const title =
+      currentSceneTitle.trim() || `Scene ${new Date().toLocaleString()}`;
+
+    try {
+      const response = await fetch("/api/save-to-gallery", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          title,
+          original_image: originalImage,
+          depth_map: depthMap,
+          inpainted_image: inpaintedImage,
+          image_size: imageSize,
+        }),
+      });
+
+      if (response.ok) {
+        alert("Scene saved to gallery!");
+        setCurrentSceneTitle("");
+      } else {
+        alert("Failed to save scene");
+      }
+    } catch (error) {
+      console.error("Error saving to gallery:", error);
+      alert("Failed to save scene");
+    }
+  };
+
+  const loadSceneFromGallery = (scene: any) => {
+    setOriginalImage(scene.original_image);
+    setDepthMap(scene.depth_map);
+    setInpaintedImage(scene.inpainted_image);
+    setImageSize(scene.image_size);
+    setCurrentSceneTitle(scene.title);
+  };
+
   const hasContent = inpaintedImage && depthMap;
 
   return (
     <main className="bg-slate-900 text-white min-h-screen">
-      <header className="p-4 text-center">
+      <header className="p-4 text-center relative">
         <h1 className="text-4xl font-bold">Spatial Scene</h1>
         <p className="text-slate-400">
           Upload an image to convert it into a 3D scene with real parallax.
         </p>
+        <button
+          onClick={() => setShowGallery(true)}
+          className="absolute top-4 right-4 bg-slate-700 hover:bg-slate-600 text-white p-2 rounded-lg flex items-center gap-2 transition-colors"
+          title="Open Gallery"
+        >
+          <GalleryIcon />
+          <span className="hidden sm:inline">Gallery</span>
+        </button>
       </header>
       {isMobile && gyroPermissionState === "prompt" && (
         <div className="flex justify-center mb-4">
@@ -442,6 +531,30 @@ function App() {
               ? "Move your mouse or device to experience the parallax effect"
               : "Select an image to begin"}
           </p>
+
+          {/* Save to Gallery section */}
+          {hasContent && (
+            <div className="mb-4 p-4 bg-slate-700 rounded-lg">
+              <h3 className="text-lg font-semibold text-white mb-2">
+                Save to Gallery
+              </h3>
+              <input
+                type="text"
+                placeholder="Enter scene title (optional)"
+                value={currentSceneTitle}
+                onChange={(e) => setCurrentSceneTitle(e.target.value)}
+                className="w-full p-2 mb-3 bg-slate-600 text-white rounded border border-slate-500 focus:border-indigo-500 focus:outline-none"
+              />
+              <button
+                onClick={saveToGallery}
+                className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition-colors flex items-center gap-2 mx-auto"
+              >
+                <SaveIcon />
+                Save Scene
+              </button>
+            </div>
+          )}
+
           <div className="flex items-center justify-center mb-4">
             <input
               type="checkbox"
@@ -473,6 +586,14 @@ function App() {
           </button>
         </div>
       </footer>
+
+      {/* Gallery Modal */}
+      {showGallery && (
+        <Gallery
+          onSelectScene={loadSceneFromGallery}
+          onClose={() => setShowGallery(false)}
+        />
+      )}
     </main>
   );
 }
