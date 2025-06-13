@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
 import io
@@ -21,7 +21,7 @@ def read_root():
     return {"Hello": "World"}
 
 @app.post("/process-image")
-async def process_image(file: UploadFile = File(...)):
+async def process_image(file: UploadFile = File(...), inpaint: bool = Form(True)):
     contents = await file.read()
     image = Image.open(io.BytesIO(contents))
     
@@ -29,7 +29,7 @@ async def process_image(file: UploadFile = File(...)):
     depth_map_image = depth_estimator.estimate_depth(image)
     
     # 2. Inpaint Image (and depth map)
-    inpainted_image, inpainted_depth_map = inpainter.inpaint_image(image, depth_map_image)
+    inpainted_image, inpainted_depth_map = inpainter.inpaint_image(image, depth_map_image, enabled=inpaint)
 
     # 3. Encode all images to Base64
     def image_to_base64(img: Image.Image) -> str:

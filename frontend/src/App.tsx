@@ -230,6 +230,7 @@ function App() {
   const [depthMap, setDepthMap] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [imageSize, setImageSize] = useState({ width: 1, height: 1 });
+  const [isInpaintingEnabled, setIsInpaintingEnabled] = useState(true);
   const [gyroPermissionState, setGyroPermissionState] = useState<
     "prompt" | "granted" | "denied"
   >("prompt");
@@ -307,6 +308,7 @@ function App() {
 
     const formData = new FormData();
     formData.append("file", file);
+    formData.append("inpaint", String(isInpaintingEnabled));
 
     try {
       const response = await fetch("/api/process-image", {
@@ -405,6 +407,21 @@ function App() {
               ? "Move your mouse or device to experience the parallax effect"
               : "Select an image to begin"}
           </p>
+          <div className="flex items-center justify-center mb-4">
+            <input
+              type="checkbox"
+              id="inpainting-toggle"
+              checked={isInpaintingEnabled}
+              onChange={(e) => setIsInpaintingEnabled(e.target.checked)}
+              className="w-4 h-4 text-indigo-600 bg-gray-100 border-gray-300 rounded focus:ring-indigo-500"
+            />
+            <label
+              htmlFor="inpainting-toggle"
+              className="ml-2 text-sm font-medium text-gray-300"
+            >
+              Enable Inpainting
+            </label>
+          </div>
           <input
             type="file"
             ref={fileInputRef}

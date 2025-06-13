@@ -27,12 +27,16 @@ class Inpainter:
             self.initialized = True
             print("Inpainter initialized.")
 
-    def inpaint_image(self, image: Image.Image, depth_map: Image.Image) -> tuple[Image.Image, Image.Image]:
+    def inpaint_image(self, image: Image.Image, depth_map: Image.Image, enabled: bool = True) -> tuple[Image.Image, Image.Image]:
         """
         Performs context-aware inpainting on an image based on a depth map.
         It identifies disocclusion areas from the depth map, inpaints both the
         color image and the depth map, and returns the results.
         """
+        if not enabled:
+            print("Inpainting disabled. Returning original images.")
+            return image, depth_map
+
         print("Starting context-aware inpainting...")
 
         # Convert PIL Images to numpy arrays for processing
@@ -46,7 +50,7 @@ class Inpainter:
 
         # Dilate the edges to create a wider mask for inpainting
         # This covers the area "behind" the edges that needs to be filled
-        kernel = np.ones((15, 15), np.uint8)
+        kernel = np.ones((7, 7), np.uint8)
         mask_dilated = cv2.dilate(edges, kernel, iterations=1)
         
         # Convert dilated mask to a PIL Image
