@@ -70,7 +70,7 @@ function LdiLayers({
       const beta = event.beta; // Front-to-back tilt [-180, 180]
 
       const x = Math.min(Math.max(gamma, -maxTilt), maxTilt) / maxTilt;
-      const neutralBeta = 45;
+      const neutralBeta = 0; // When the device is flat, beta is 0.
       const y =
         Math.min(Math.max(beta - neutralBeta, -maxTilt), maxTilt) / maxTilt;
 
