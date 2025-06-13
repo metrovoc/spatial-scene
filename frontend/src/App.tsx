@@ -290,7 +290,7 @@ function App() {
     formData.append("file", file);
 
     try {
-      const response = await fetch("http://127.0.0.1:8000/process-image", {
+      const response = await fetch("/api/process-image", {
         method: "POST",
         body: formData,
       });
