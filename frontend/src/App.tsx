@@ -48,11 +48,47 @@ function LdiLayers({
     [depthMap]
   );
 
-  const mouse = useRef(new THREE.Vector2(0, 0));
+  const isMobile = useMemo(
+    () =>
+      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+        navigator.userAgent
+      ),
+    []
+  );
 
-  useFrame(({ mouse: { x, y } }) => {
-    // Lerp the mouse position for smooth movement
-    mouse.current.lerp(new THREE.Vector2(x, y), 0.05);
+  const parallax = useRef(new THREE.Vector2(0, 0));
+  const targetParallax = useRef(new THREE.Vector2(0, 0));
+
+  useEffect(() => {
+    if (!isMobile) return;
+
+    const handleDeviceOrientation = (event: DeviceOrientationEvent) => {
+      if (event.gamma === null || event.beta === null) return;
+
+      const maxTilt = 25; // Max tilt in degrees
+      const gamma = event.gamma; // Left-to-right tilt [-90, 90]
+      const beta = event.beta; // Front-to-back tilt [-180, 180]
+
+      const x = Math.min(Math.max(gamma, -maxTilt), maxTilt) / maxTilt;
+      const neutralBeta = 45;
+      const y =
+        Math.min(Math.max(beta - neutralBeta, -maxTilt), maxTilt) / maxTilt;
+
+      targetParallax.current.set(x, y);
+    };
+
+    window.addEventListener("deviceorientation", handleDeviceOrientation);
+
+    return () => {
+      window.removeEventListener("deviceorientation", handleDeviceOrientation);
+    };
+  }, [isMobile]);
+
+  useFrame(({ mouse }) => {
+    if (!isMobile) {
+      targetParallax.current.set(mouse.x, mouse.y);
+    }
+    parallax.current.lerp(targetParallax.current, 0.05);
   });
 
   const vertexShader = `
@@ -112,7 +148,7 @@ function LdiLayers({
           uDepthMap: { value: depthTexture },
           uLayer: { value: i },
           uLayers: { value: layers },
-          uMouse: { value: mouse.current },
+          uMouse: { value: parallax.current },
           uParallax: { value: parallaxFactor },
         };
 
@@ -189,8 +225,20 @@ function App() {
   const [depthMap, setDepthMap] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [imageSize, setImageSize] = useState({ width: 1, height: 1 });
+  const [showGyroButton, setShowGyroButton] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const isIOS =
+      /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
+    if (
+      isIOS &&
+      typeof (DeviceOrientationEvent as any).requestPermission === "function"
+    ) {
+      setShowGyroButton(true);
+    }
+  }, []);
 
   // Effect to handle cleanup of blob URL for the initial upload
   useEffect(() => {
@@ -205,6 +253,19 @@ function App() {
       }
     };
   }, [originalImage]);
+
+  const handleRequestGyroPermission = () => {
+    (DeviceOrientationEvent as any)
+      .requestPermission()
+      .then((permissionState: string) => {
+        if (permissionState === "granted") {
+          setShowGyroButton(false);
+        } else {
+          alert("Gyroscope permission not granted.");
+        }
+      })
+      .catch(console.error);
+  };
 
   const handleImageUpload = async (
     event: React.ChangeEvent<HTMLInputElement>
@@ -249,13 +310,12 @@ function App() {
 
   const triggerFileInput = () => {
     fileInputRef.current?.click();
-  };
-
-  const handleFullscreen = () => {
     if (screenfull.isEnabled && canvasContainerRef.current) {
       screenfull.toggle(canvasContainerRef.current);
     }
   };
+
+  const hasContent = inpaintedImage && depthMap;
 
   return (
     <main className="bg-slate-900 text-white min-h-screen">
@@ -265,13 +325,22 @@ function App() {
           Upload an image to convert it into a 3D scene with real parallax.
         </p>
       </header>
-
+      {showGyroButton && (
+        <div className="flex justify-center mb-4">
+          <button
+            onClick={handleRequestGyroPermission}
+            className="bg-indigo-600 text-white px-4 py-2 rounded-lg shadow-lg hover:bg-indigo-700 transition-colors"
+          >
+            Enable Gyroscope for Motion Control
+          </button>
+        </div>
+      )}
       <div
         ref={canvasContainerRef}
         className="w-full h-[60vh] border-y border-slate-700 relative bg-black"
       >
         <button
-          onClick={handleFullscreen}
+          onClick={triggerFileInput}
           className="absolute top-2 right-2 z-10 p-2 bg-slate-700 bg-opacity-50 rounded-md hover:bg-opacity-75 transition-colors"
           title="Toggle Fullscreen"
         >
@@ -306,7 +375,7 @@ function App() {
         <div className="inline-block bg-slate-800 rounded-lg p-6 border border-slate-700">
           <p className="mb-4">
             {originalImage
-              ? "Move your mouse to experience the parallax effect"
+              ? "Move your mouse or device to experience the parallax effect"
               : "Select an image to begin"}
           </p>
           <input
@@ -315,24 +384,13 @@ function App() {
             onChange={handleImageUpload}
             className="hidden"
             accept="image/*"
-            disabled={isLoading}
           />
           <button
             onClick={triggerFileInput}
             disabled={isLoading}
-            className="
-              py-2 px-4 rounded-full border-0
-              text-sm font-semibold
-              bg-violet-50 text-violet-700
-              hover:bg-violet-100
-              disabled:bg-slate-600 disabled:text-slate-400 disabled:cursor-not-allowed
-            "
+            className="bg-indigo-500 text-white font-bold py-2 px-4 rounded-lg hover:bg-indigo-600 disabled:bg-slate-600 disabled:cursor-not-allowed transition-colors"
           >
-            {isLoading
-              ? "Processing..."
-              : originalImage
-              ? "Change Image"
-              : "Upload Image"}
+            {isLoading ? "Processing..." : "Upload Image"}
           </button>
         </div>
       </footer>
