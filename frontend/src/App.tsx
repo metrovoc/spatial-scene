@@ -37,7 +37,7 @@ function LdiLayers({
   planeHeight: number;
 }) {
   const layers = 32; // More layers for a smoother effect
-  const parallaxFactor = 0.2; // How much the layers shift
+  const parallaxFactor = 0.05; // How much the layers shift
 
   const texture = useMemo(
     () => new THREE.TextureLoader().load(inpaintedImage),
@@ -65,7 +65,7 @@ function LdiLayers({
     const handleDeviceOrientation = (event: DeviceOrientationEvent) => {
       if (event.gamma === null || event.beta === null) return;
 
-      const maxTilt = 25; // Max tilt in degrees
+      const maxTilt = 15; // Max tilt in degrees
       const gamma = event.gamma; // Left-to-right tilt [-90, 90]
       const beta = event.beta; // Front-to-back tilt [-180, 180]
 
@@ -308,11 +308,14 @@ function App() {
     }
   };
 
-  const triggerFileInput = () => {
-    fileInputRef.current?.click();
+  const handleFullscreen = () => {
     if (screenfull.isEnabled && canvasContainerRef.current) {
       screenfull.toggle(canvasContainerRef.current);
     }
+  };
+
+  const triggerFileInput = () => {
+    fileInputRef.current?.click();
   };
 
   const hasContent = inpaintedImage && depthMap;
@@ -340,7 +343,7 @@ function App() {
         className="w-full h-[60vh] border-y border-slate-700 relative bg-black"
       >
         <button
-          onClick={triggerFileInput}
+          onClick={handleFullscreen}
           className="absolute top-2 right-2 z-10 p-2 bg-slate-700 bg-opacity-50 rounded-md hover:bg-opacity-75 transition-colors"
           title="Toggle Fullscreen"
         >
