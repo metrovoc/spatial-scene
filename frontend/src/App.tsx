@@ -310,7 +310,11 @@ function App() {
 
   const handleFullscreen = () => {
     if (screenfull.isEnabled && canvasContainerRef.current) {
-      screenfull.toggle(canvasContainerRef.current);
+      screenfull.toggle(canvasContainerRef.current).catch(() => {
+        alert("Could not activate fullscreen mode.");
+      });
+    } else {
+      alert("Fullscreen is not supported on this device.");
     }
   };
 
