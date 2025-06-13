@@ -40,6 +40,9 @@ function LdiLayers({
 }) {
   const layers = 32; // More layers for a smoother effect
   const parallaxFactor = 0.05; // How much the layers shift
+  const [orientation, setOrientation] = useState(
+    window.screen.orientation.type
+  );
 
   const texture = useMemo(
     () => new THREE.TextureLoader().load(inpaintedImage),
@@ -62,19 +65,51 @@ function LdiLayers({
   const targetParallax = useRef(new THREE.Vector2(0, 0));
 
   useEffect(() => {
+    const handleOrientationChange = () => {
+      setOrientation(window.screen.orientation.type);
+    };
+
+    window.screen.orientation.addEventListener(
+      "change",
+      handleOrientationChange
+    );
+
+    return () => {
+      window.screen.orientation.removeEventListener(
+        "change",
+        handleOrientationChange
+      );
+    };
+  }, []);
+
+  useEffect(() => {
     if (!isMobile || !isGyroEnabled) return;
 
     const handleDeviceOrientation = (event: DeviceOrientationEvent) => {
       if (event.gamma === null || event.beta === null) return;
 
       const maxTilt = 15; // Max tilt in degrees
-      const gamma = event.gamma; // Left-to-right tilt [-90, 90]
-      const beta = event.beta; // Front-to-back tilt [-180, 180]
+      let gamma = event.gamma; // Left-to-right tilt in degrees [-90, 90]
+      let beta = event.beta; // Front-to-back tilt in degrees [-180, 180]
 
-      const x = Math.min(Math.max(gamma, -maxTilt), maxTilt) / maxTilt;
-      const neutralBeta = 0; // When the device is flat, beta is 0.
-      const y =
-        Math.min(Math.max(beta - neutralBeta, -maxTilt), maxTilt) / maxTilt;
+      let x, y;
+
+      // Adjust for screen orientation
+      if (orientation.startsWith("landscape")) {
+        // In landscape, beta becomes the horizontal axis, gamma the vertical
+        x = Math.min(Math.max(beta, -maxTilt), maxTilt) / maxTilt;
+        y = Math.min(Math.max(gamma, -maxTilt), maxTilt) / maxTilt;
+
+        if (orientation === "landscape-secondary") {
+          x = -x;
+          y = -y;
+        }
+      } else {
+        // In portrait, gamma is horizontal, beta is vertical
+        x = Math.min(Math.max(gamma, -maxTilt), maxTilt) / maxTilt;
+        const neutralBeta = 0; // Assuming neutral is holding device upright
+        y = Math.min(Math.max(beta - neutralBeta, -maxTilt), maxTilt) / maxTilt;
+      }
 
       targetParallax.current.set(x, y);
     };
@@ -84,7 +119,7 @@ function LdiLayers({
     return () => {
       window.removeEventListener("deviceorientation", handleDeviceOrientation);
     };
-  }, [isMobile, isGyroEnabled]);
+  }, [isMobile, isGyroEnabled, orientation]);
 
   useFrame(({ mouse }) => {
     if (!isMobile) {
