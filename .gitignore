@@ -12,7 +12,6 @@ frontend/dist/
 frontend/build/
 frontend/public/
 frontend/src/assets/
-frontend/src/components/
 frontend/src/pages/
 frontend/src/styles/
 frontend/src/utils/
