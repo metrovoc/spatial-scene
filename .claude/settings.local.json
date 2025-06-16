@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(*)",
+      "Search(*)",
+      "Edit(*)",
+      "Write(*)",
+      "WebFetch(domain:shihmengli.github.io)",
+      "Bash(grep:*)",
+      "Bash(./start-dev.sh:*)",
+      "Bash(npm run build:*)"
+    ]
+  }
+}
