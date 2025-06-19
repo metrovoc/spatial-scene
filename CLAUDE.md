@@ -3,6 +3,9 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 总是使用中文思考和回答
 积极使用 git 管理版本
+禁止署名 commit
+commit 消息不超过 10 词
+使用 bark 通知用户
 
 ## Development Commands
 

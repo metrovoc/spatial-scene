@@ -252,15 +252,18 @@ function SpatialScene({
   depthMap,
   imageSize,
   isGyroEnabled,
+  isFullscreen,
 }: {
   inpaintedImage: string;
   depthMap: string;
   imageSize: { width: number; height: number };
   isGyroEnabled: boolean;
+  isFullscreen: boolean;
 }) {
   const { camera, size: canvasSize } = useThree();
+  const [zoomScale, setZoomScale] = useState(1);
 
-  const basePlaneWidth = 5;
+  const basePlaneWidth = 5 * zoomScale;
   const imageAspect = imageSize.width / imageSize.height;
   const planeHeight = basePlaneWidth / imageAspect;
 
@@ -279,10 +282,64 @@ function SpatialScene({
       distance = planeHeight / 2 / Math.tan(verticalFov / 2);
     }
 
-    camera.position.z = distance * 1.2;
+    // Add dynamic padding instead of hardcoded multipliers for true fit-to-screen
+    const paddingRatio = isFullscreen ? 0.05 : 0.12; // 5% padding in fullscreen, 12% in windowed
+    const paddingDistance = distance * paddingRatio;
+    camera.position.z = distance + paddingDistance;
     camera.lookAt(0, 0, 0);
     camera.updateProjectionMatrix();
-  }, [camera, canvasSize, imageSize, planeHeight, imageAspect]);
+  }, [camera, canvasSize, imageSize, planeHeight, imageAspect, isFullscreen]);
+
+  // Add pinch-to-zoom support
+  useEffect(() => {
+    let initialDistance = 0;
+    let initialScale = zoomScale;
+
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        const touch1 = e.touches[0];
+        const touch2 = e.touches[1];
+        initialDistance = Math.hypot(
+          touch2.clientX - touch1.clientX,
+          touch2.clientY - touch1.clientY
+        );
+        initialScale = zoomScale;
+      }
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        e.preventDefault();
+        const touch1 = e.touches[0];
+        const touch2 = e.touches[1];
+        const currentDistance = Math.hypot(
+          touch2.clientX - touch1.clientX,
+          touch2.clientY - touch1.clientY
+        );
+        
+        if (initialDistance > 0) {
+          const scale = (currentDistance / initialDistance) * initialScale;
+          setZoomScale(Math.max(0.3, Math.min(3, scale)));
+        }
+      }
+    };
+
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const delta = e.deltaY > 0 ? 0.9 : 1.1;
+      setZoomScale(prev => Math.max(0.3, Math.min(3, prev * delta)));
+    };
+
+    document.addEventListener('touchstart', handleTouchStart, { passive: false });
+    document.addEventListener('touchmove', handleTouchMove, { passive: false });
+    document.addEventListener('wheel', handleWheel, { passive: false });
+
+    return () => {
+      document.removeEventListener('touchstart', handleTouchStart);
+      document.removeEventListener('touchmove', handleTouchMove);
+      document.removeEventListener('wheel', handleWheel);
+    };
+  }, [zoomScale]);
 
   return (
     <group>
@@ -303,12 +360,13 @@ function App() {
   const [depthMap, setDepthMap] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [imageSize, setImageSize] = useState({ width: 1, height: 1 });
-  const [isInpaintingEnabled, setIsInpaintingEnabled] = useState(true);
+  const [isInpaintingEnabled, setIsInpaintingEnabled] = useState(false);
   const [gyroPermissionState, setGyroPermissionState] = useState<
     "prompt" | "granted" | "denied"
   >("prompt");
   const [showGallery, setShowGallery] = useState(false);
   const [currentSceneTitle, setCurrentSceneTitle] = useState("");
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const canvasContainerRef = useRef<HTMLDivElement>(null);
 
@@ -329,6 +387,18 @@ function App() {
       setGyroPermissionState("granted");
     }
   }, [isMobile]);
+
+  // Monitor fullscreen changes
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    };
+  }, []);
 
   // Effect to handle cleanup of blob URL for the initial upload
   useEffect(() => {
@@ -489,7 +559,9 @@ function App() {
       )}
       <div
         ref={canvasContainerRef}
-        className="w-full h-[60vh] border-y border-slate-700 relative bg-black"
+        className={`w-full border-y border-slate-700 relative bg-black ${
+          isFullscreen ? 'h-screen' : 'h-[60vh]'
+        }`}
       >
         <button
           onClick={handleFullscreen}
@@ -507,6 +579,7 @@ function App() {
                 depthMap={depthMap}
                 imageSize={imageSize}
                 isGyroEnabled={gyroPermissionState === "granted"}
+                isFullscreen={isFullscreen}
               />
             ) : (
               <Text color="white" anchorX="center" anchorY="middle">
